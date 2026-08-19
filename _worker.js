@@ -919,7 +919,7 @@ var baseHTML = `
           scrollbar-width: none;  /* Firefox */
       }
     </style>
-    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lozad/dist/lozad.min.js"><\/script>
+    <script>/* lozad CDN removed — not needed for ping */</script>
     <script>
       tailwind.config = {
         darkMode: 'selector',
@@ -1363,17 +1363,13 @@ var baseHTML = `
       }
 
       window.onload = () => {
-        checkGeoip();
-        checkProxy();
-        // checkRegion();
-
-        const observer = lozad(".lozad", {
-          load: function (el) {
-            el.classList.remove("scale-95");
-          },
-        });
-        observer.observe();
-      };
+              checkGeoip();
+              checkProxy();
+              // checkRegion();
+              // fallback: kalau onload kelewat (CDN slow), jalankan lagi
+              setTimeout(checkProxy, 800);
+              setTimeout(checkProxy, 2000);
+            };
 
       window.onscroll = () => {
         const paginationContainer = document.getElementById("container-pagination");
@@ -1418,7 +1414,7 @@ PLACEHOLDER_INFO`);
     proxyGroupElement += `<div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">`;
     for (let i = 0; i < this.proxies.length; i++) {
       const proxyData = this.proxies[i];
-      proxyGroupElement += `<div class="lozad scale-95 mb-2 bg-white dark:bg-neutral-800 transition-transform duration-200 rounded-lg p-4 w-60 border-2 border-neutral-800">`;
+      proxyGroupElement += `<div class="mb-2 bg-white dark:bg-neutral-800 transition-transform duration-200 rounded-lg p-4 w-60 border-2 border-neutral-800">`;
       proxyGroupElement += `  <div id="countryFlag" class="absolute -translate-y-9 -translate-x-2 border-2 border-neutral-800 rounded-full overflow-hidden"><img width="32" src="https://hatscripts.github.io/circle-flags/flags/${proxyData.country.toLowerCase()}.svg" /></div>`;
       proxyGroupElement += `  <div>`;
       proxyGroupElement += `    <div id="ping-${i}" class="animate-pulse text-xs font-semibold dark:text-white">Idle ${proxyData.proxyIP}:${proxyData.proxyPort}</div>`;
