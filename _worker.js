@@ -781,14 +781,12 @@ async function checkProxyHealth(proxyIP2, proxyPort) {
     const t0 = Date.now();
     const socket = connect({ hostname: proxyIP2, port: proxyPort });
     const ok = await new Promise((resolve) => {
-      socket.writable = true;
-      socket.opened = resolve.bind(null, true);
-      socket.closed = resolve.bind(null, false);
-      socket.error = resolve.bind(null, false);
-      setTimeout(() => {
-        try { socket.close(); } catch (e) {}
-        resolve(false);
-      }, 5000);
+      let settled = false;
+      const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+      socket.opened = done.bind(null, true);
+      socket.closed = done.bind(null, false);
+      socket.error = done.bind(null, false);
+      setTimeout(() => { try { socket.close(); } catch (e) {} done(false); }, 5000);
     });
     const latency = Date.now() - t0;
     if (!ok) return { statusCode: 0, latency: -1, error: "timeout/unreachable" };
