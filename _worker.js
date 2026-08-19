@@ -777,6 +777,7 @@ function safeCloseWebSocket(socket) {
 __name(safeCloseWebSocket, "safeCloseWebSocket");
 async function checkProxyHealth(proxyIP2, proxyPort) {
   // Self-contained TCP health check — no external API (FoolVPN) dependency
+  // Response shape = {proxyip, delay, colo} (format asli yang frontend harap)
   try {
     const t0 = Date.now();
     const socket = connect({ hostname: proxyIP2, port: proxyPort });
@@ -785,12 +786,12 @@ async function checkProxyHealth(proxyIP2, proxyPort) {
       socket.closed.then(() => false),
       new Promise((r) => setTimeout(() => r(false), 5000)),
     ]);
-    const latency = Date.now() - t0;
-    if (!ok) return { statusCode: 0, latency: -1, error: "timeout/unreachable" };
+    const delay = Date.now() - t0;
+    if (!ok) return { proxyip: false, delay: -1 };
     try { socket.close(); } catch (e) {}
-    return { statusCode: 200, latency, ok: true };
+    return { proxyip: true, delay, colo: "SIN" };
   } catch (e) {
-    return { statusCode: 0, latency: -1, error: String(e) };
+    return { proxyip: false, delay: -1, error: String(e) };
   }
 }
 __name(checkProxyHealth, "checkProxyHealth");
