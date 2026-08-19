@@ -1,16 +1,8 @@
 {
-  "name": "nautica",
+  "name": "bakulcilor",
   "version": "1.0.0",
   "license": "ISC",
   "type": "module",
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
-  },
-  "dependencies": {
-    "@types/node": "^22.10.2",
-    "javascript-obfuscator": "^4.1.1"
-  }
+  "description": "Cloudflare Worker proxy tunnel (Nautica fork by burnicehomenick)",
+  "dependencies": {}
 }
