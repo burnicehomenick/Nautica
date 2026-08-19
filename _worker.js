@@ -156,7 +156,24 @@ export default {
       } else if (url.pathname.startsWith("/api/v1")) {
         const apiPath = url.pathname.replace("/api/v1", "");
 
-        if (apiPath.startsWith("/sub")) {
+        if (apiPath.startsWith("/domains")) {
+          if (!(env.CF_API_TOKEN && env.CF_ACCOUNT_ID && env.CF_ZONE_ID)) {
+            return new Response("API not ready (set CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID)", { status: 500 });
+          }
+          const wildcardApiPath = apiPath.replace("/domains", "");
+          const cfApi = new CloudflareApi(env);
+          if (wildcardApiPath == "/get") {
+            const domains = await cfApi.getDomainList();
+            return new Response(JSON.stringify(domains), { headers: { ...CORS_HEADER_OPTIONS } });
+          } else if (wildcardApiPath == "/put") {
+            const domain2 = url.searchParams.get("domain");
+            const register = await cfApi.registerDomain(domain2);
+            return new Response(register.toString(), {
+              status: register,
+              headers: { ...CORS_HEADER_OPTIONS },
+            });
+          }
+        } else if (apiPath.startsWith("/sub")) {
           const filterCC = url.searchParams.get("cc")?.split(",") || [];
           const filterPort = url.searchParams.get("port")?.split(",") || PORTS;
           const filterVPN = url.searchParams.get("vpn")?.split(",") || PROTOCOLS;
@@ -1117,7 +1134,7 @@ function safeCloseWebSocket(socket) {
 }
 
 async function handleSubPage(request, url, env) {
-  // Render halaman sub sendiri (gak redirect ke eksternal — anti loop)
+  // Render halaman sub sendiri — UI kartu grid (anti loop redirect)
   const pageIndex = parseInt(url.pathname.match(/^\/sub\/(\d+)$/)?.[1] || "0");
   const countrySelect = url.searchParams.get("cc")?.split(",");
   const prxBankUrl = url.searchParams.get("prx-list") || env.PRX_BANK_URL;
@@ -1129,40 +1146,149 @@ async function handleSubPage(request, url, env) {
   const page = Math.min(pageIndex, totalPages - 1);
   const slice = prxList.slice(page * pageSize, page * pageSize + pageSize);
 
-  let rows = "";
+  // == Filter bendera negara (top bar) ==
+  const countries = [...new Set(prxList.map((p) => p.country))].sort();
+  let flags = `<a href="/sub" class="flag-chip ${countrySelect ? "" : "active"}" title="Semua negara">🌐</a>`;
+  for (const c of countries) {
+    const act = countrySelect?.includes(c) ? "active" : "";
+    flags += `<a href="/sub?cc=${c}" class="flag-chip ${act}" title="${c}">${getFlagEmoji(c)} <span class="cc">${c}</span></a>`;
+  }
+
+  // == Panel wildcard domain (jika env CF API diset) ==
+  const apiReady = !!(env.CF_API_TOKEN && env.CF_ACCOUNT_ID && env.CF_ZONE_ID);
+  let domainUI = "";
+  if (apiReady) {
+    const rootDom = env.CF_ROOT_DOMAIN || APP_DOMAIN.split(".").slice(1).join(".");
+    domainUI = `<details class="mt-6 bg-neutral-800/70 border border-neutral-700 rounded-xl p-4">
+<summary class="cursor-pointer text-sm font-semibold text-amber-400">＋ Daftarkan wildcard domain (${APP_DOMAIN})</summary>
+<div class="mt-3 flex gap-2">
+<form action="/api/v1/domains/put" method="get" class="flex gap-2 flex-1">
+<input name="domain" placeholder="nama.${rootDom}" class="flex-1 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400"/>
+<button class="bg-amber-400 hover:bg-amber-300 text-black px-4 py-2 rounded-lg text-sm font-semibold transition">Daftar</button>
+</form>
+<a href="/api/v1/domains/get" class="bg-neutral-700 hover:bg-neutral-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap">List Domain</a>
+</div></details>`;
+  }
+
+  // == Kartu proxy ==
+  let cards = "";
   for (const prx of slice) {
     const uuid = crypto.randomUUID();
-    const uri = new URL(`${atob(horse)}://${APP_DOMAIN}`);
-    uri.searchParams.set("encryption", "none");
-    uri.searchParams.set("type", "ws");
-    uri.searchParams.set("host", APP_DOMAIN);
-    uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-    uri.searchParams.set("security", "tls");
-    uri.searchParams.set("sni", APP_DOMAIN);
-    uri.username = uuid;
-    uri.port = "443";
-    uri.hash = `${getFlagEmoji(prx.country)} ${prx.org} [${serviceName}]`;
-    rows += `<tr><td>${getFlagEmoji(prx.country)}</td><td>${prx.prxIP}:${prx.prxPort}</td><td>${prx.org}</td><td><code style="font-size:11px">${uri.toString().slice(0, 80)}…</code></td></tr>`;
+    // Vless (default)
+    const uriVless = new URL(`vless://${uuid}@${APP_DOMAIN}:443`);
+    uriVless.searchParams.set("encryption", "none");
+    uriVless.searchParams.set("type", "ws");
+    uriVless.searchParams.set("host", APP_DOMAIN);
+    uriVless.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+    uriVless.searchParams.set("security", "tls");
+    uriVless.searchParams.set("sni", APP_DOMAIN);
+    uriVless.hash = `${getFlagEmoji(prx.country)} ${prx.org} WS TLS [${serviceName}]`;
+    // Trojan
+    const uriTrojan = new URL(`trojan://${uuid}@${APP_DOMAIN}:443`);
+    uriTrojan.searchParams.set("type", "ws");
+    uriTrojan.searchParams.set("host", APP_DOMAIN);
+    uriTrojan.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+    uriTrojan.searchParams.set("security", "tls");
+    uriTrojan.searchParams.set("sni", APP_DOMAIN);
+    uriTrojan.hash = `${getFlagEmoji(prx.country)} ${prx.org} Trojan WS TLS [${serviceName}]`;
+
+    cards += `<div class="proxy-card">
+<div class="card-top">
+  <div class="flag-big" title="${prx.country}">${getFlagEmoji(prx.country)}</div>
+  <div class="flex-1 min-w-0">
+    <div class="font-semibold truncate">${prx.org}</div>
+    <div class="text-xs text-neutral-400 mono">${prx.prxIP}:${prx.prxPort} · ${prx.country}</div>
+  </div>
+  <span class="badge">WS TLS</span>
+</div>
+<div class="card-actions">
+  <button class="btn-copy btn-vless" onclick="copyCfg('${uriVless.toString().replace(/'/g, "\\'")}')">VLESS</button>
+  <button class="btn-copy btn-trojan" onclick="copyCfg('${uriTrojan.toString().replace(/'/g, "\\'")}')">TROJAN</button>
+</div>
+</div>`;
   }
 
-  // Pagination
+  // == Pagination ==
   let pag = "";
   for (let i = 0; i < totalPages; i++) {
-    const active = i === page ? 'style="background:#f59e0b;color:#000"' : "";
-    pag += `<a href="/sub/${i}?${url.searchParams.toString()}" ${active} class="px-3 py-1 border rounded">${i + 1}</a> `;
+    const act = i === page ? "active" : "";
+    pag += `<a href="/sub/${i}?${url.searchParams.toString()}" class="page-btn ${act}">${i + 1}</a>`;
   }
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${serviceName} — Proxy List</title>
-<script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-neutral-900 text-white p-6">
-<h1 class="text-2xl font-bold mb-2">${serviceName} <span class="text-amber-400">Nautica</span></h1>
-<p class="text-sm mb-1">Total: ${prxList.length} proxy | Page ${page + 1}/${totalPages}</p>
-<p class="text-sm mb-4 text-neutral-400">Endpoint: <code>/api/v1/sub?limit=10&amp;format=raw</code> · Format: raw, v2ray, clash, sfa, bfr</p>
-<table class="w-full text-sm border-collapse">
-<thead><tr class="text-left border-b border-neutral-700"><th class="py-2">Negara</th><th>IP:Port</th><th>Org</th><th>Config</th></tr></thead>
-<tbody>${rows}</tbody></table>
-<div class="mt-4">${pag}</div>
-<p class="mt-6 text-xs text-neutral-500">Powered by Nautica · fork burnicehomenick · ${new Date().toISOString()}</p>
+  const html = `<!DOCTYPE html><html lang="id"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${serviceName} · ${rootDomain}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e5e7eb;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;min-height:100vh}
+.wrap{max-width:1200px;margin:0 auto;padding:24px 16px 60px}
+header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+.logo{font-size:22px;font-weight:800;letter-spacing:-0.5px}
+.logo span{color:#f59e0b}
+.logo small{font-size:12px;color:#6b7280;font-weight:500;margin-left:8px}
+.stats{display:flex;gap:16px;font-size:13px;color:#9ca3af}
+.stats b{color:#f59e0b;font-weight:700}
+.flags-bar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:24px}
+.flag-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;background:#17171f;border:1px solid #2a2a35;border-radius:999px;font-size:13px;text-decoration:none;color:#d1d5db;transition:all .15s}
+.flag-chip:hover{border-color:#f59e0b}
+.flag-chip.active{background:#f59e0b;border-color:#f59e0b;color:#09090b;font-weight:700}
+.flag-chip .cc{font-size:10px;opacity:.7}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+.proxy-card{background:#13131b;border:1px solid #23232e;border-radius:14px;padding:16px;transition:all .2s;display:flex;flex-direction:column;gap:12px}
+.proxy-card:hover{border-color:#3a3a4a;transform:translateY(-2px);box-shadow:0 8px 24px rgba(245,158,11,.06)}
+.card-top{display:flex;align-items:center;gap:10px}
+.flag-big{font-size:28px;line-height:1}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.badge{background:#1c1c26;color:#f59e0b;border:1px solid #33333f;font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;white-space:nowrap}
+.card-actions{display:flex;gap:8px}
+.btn-copy{flex:1;padding:9px 0;border:none;border-radius:9px;font-size:12px;font-weight:700;letter-spacing:.4px;cursor:pointer;transition:all .15s;color:#fff}
+.btn-vless{background:#2563eb}
+.btn-vless:hover{background:#1d4ed8}
+.btn-trojan{background:#7c3aed}
+.btn-trojan:hover{background:#6d28d9}
+.pagination{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:28px}
+.page-btn{min-width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;background:#17171f;border:1px solid #2a2a35;border-radius:8px;color:#d1d5db;text-decoration:none;font-size:13px;transition:all .15s}
+.page-btn:hover{border-color:#f59e0b;color:#f59e0b}
+.page-btn.active{background:#f59e0b;border-color:#f59e0b;color:#09090b;font-weight:700}
+.api-box{margin-top:20px;background:#0e0e14;border:1px dashed #2a2a35;border-radius:12px;padding:14px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9ca3af;line-height:1.8;overflow-x:auto}
+.api-box code{color:#f59e0b}
+footer{margin-top:36px;text-align:center;font-size:11px;color:#4b5563}
+.notif{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#f59e0b;color:#09090b;font-weight:700;font-size:13px;padding:10px 22px;border-radius:999px;opacity:0;transition:all .3s;z-index:99;pointer-events:none}
+.notif.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style></head>
+<body>
+<div class="wrap">
+<header>
+  <div class="logo">NAUTICA <span>·</span> ${serviceName.toUpperCase()}<small>${rootDomain}</small></div>
+  <div class="stats">
+    <span>Proxy <b>${prxList.length}</b></span>
+    <span>Page <b>${page + 1}/${totalPages}</b></span>
+    <span>Colo <b>SIN</b></span>
+  </div>
+</header>
+<div class="flags-bar">${flags}</div>
+<div class="grid">${cards}</div>
+<div class="pagination">${pag}</div>
+${domainUI}
+<div class="api-box">API SUB · <code>/api/v1/sub?limit=10&amp;cc=ID,SG&amp;format=raw</code> · format: raw | v2ray | clash | sfa | bfr<br/>HEALTH · <code>/check?target=IP:PORT</code> · MYIP · <code>/api/v1/myip</code></div>
+<footer>Powered by <b>Nautica</b> (FoolVPN) · fork <b>burnicehomenick</b> · ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC</footer>
+</div>
+<div class="notif" id="notif">✓ Config disalin</div>
+<script>
+function copyCfg(cfg){
+  navigator.clipboard.writeText(cfg).then(function(){
+    var n=document.getElementById('notif');
+    n.classList.add('show');
+    setTimeout(function(){n.classList.remove('show')},1600);
+  }).catch(function(){
+    var t=document.createElement('textarea');t.value=cfg;document.body.appendChild(t);t.select();
+    document.execCommand('copy');document.body.removeChild(t);
+    var n=document.getElementById('notif');n.classList.add('show');
+    setTimeout(function(){n.classList.remove('show')},1600);
+  });
+}
+</script>
 </body></html>`;
   return new Response(html, {
     status: 200,
@@ -1189,6 +1315,50 @@ async function checkPrxHealth(prxIP, prxPort) {
     return result;
   } catch (e) {
     return { proxyip: false, error: String(e) };
+  }
+}
+
+// Cloudflare Workers API (wildcard domain registration) — pakai env var, bukan hardcode key
+class CloudflareApi {
+  constructor(env) {
+    this.token = env.CF_API_TOKEN;
+    this.accountID = env.CF_ACCOUNT_ID;
+    this.zoneID = env.CF_ZONE_ID;
+    this.rootDomain = env.CF_ROOT_DOMAIN || (APP_DOMAIN.split(".").slice(1).join("."));
+    this.headers = {
+      Authorization: `Bearer ${this.token}`,
+      "Content-Type": "application/json",
+    };
+  }
+  async getDomainList() {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${this.accountID}/workers/domains`;
+    const res = await fetch(url, { headers: this.headers });
+    if (res.status == 200) {
+      const respJson = await res.json();
+      return respJson.result
+        .filter((data) => data.service == serviceName)
+        .map((data) => data.hostname);
+    }
+    return [];
+  }
+  async registerDomain(domain2) {
+    if (!domain2) return 400;
+    domain2 = domain2.toLowerCase();
+    if (!domain2.endsWith(this.rootDomain)) return 400;
+    const registered = await this.getDomainList();
+    if (registered.includes(domain2)) return 409;
+    const url = `https://api.cloudflare.com/client/v4/accounts/${this.accountID}/workers/domains`;
+    const res = await fetch(url, {
+      method: "PUT",
+      body: JSON.stringify({
+        environment: "production",
+        hostname: domain2,
+        service: serviceName,
+        zone_id: this.zoneID,
+      }),
+      headers: this.headers,
+    });
+    return res.status;
   }
 }
 
