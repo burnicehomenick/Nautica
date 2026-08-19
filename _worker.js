@@ -19,7 +19,7 @@ var KV_PROXY_URL = "https://raw.githubusercontent.com/burnicehomenick/Nautica/re
 var PROXY_BANK_URL = "https://raw.githubusercontent.com/burnicehomenick/Nautica/refs/heads/main/proxyList.txt";
 var DNS_SERVER_ADDRESS = "8.8.8.8";
 var DNS_SERVER_PORT = 53;
-var PROXY_HEALTH_CHECK_API = "https://id1.foolvpn.me/api/v1/check";
+var PROXY_HEALTH_CHECK_API = ""; // self-contained TCP check
 var CONVERTER_URL = "https://api.foolvpn.me/convert";
 var DONATE_LINK = "https://trakteer.id/dickymuliafiqri/tip";
 var BAD_WORDS_LIST = "https://gist.githubusercontent.com/adierebel/a69396d79b787b84d89b45002cb37cd6/raw/6df5f8728b18699496ad588b3953931078ab9cf1/kata-kasar.txt";
@@ -141,10 +141,15 @@ var worker_default = {
   async fetch(request, env2, ctx) {
     try {
       const url = new URL(request.url);
-      const upgradeHeader = request.headers.get("Upgrade");
-      if (apiKey && apiEmail && accountID && zoneID) {
-        isApiReady = true;
-      }
+            const upgradeHeader = request.headers.get("Upgrade");
+            if (env2.CF_API_TOKEN && env2.CF_ACCOUNT_ID && env2.CF_ZONE_ID) {
+              apiKey = env2.CF_API_TOKEN;
+              accountID = env2.CF_ACCOUNT_ID;
+              zoneID = env2.CF_ZONE_ID;
+              if (env2.CF_ROOT_DOMAIN) rootDomain = env2.CF_ROOT_DOMAIN;
+              if (env2.CF_API_EMAIL) apiEmail = env2.CF_API_EMAIL;
+              isApiReady = true;
+            }
       if (upgradeHeader === "websocket") {
         const proxyMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
         if (url.pathname.length == 3 || url.pathname.match(",")) {
@@ -771,8 +776,27 @@ function safeCloseWebSocket(socket) {
 }
 __name(safeCloseWebSocket, "safeCloseWebSocket");
 async function checkProxyHealth(proxyIP2, proxyPort) {
-  const req = await fetch(`${PROXY_HEALTH_CHECK_API}?ip=${proxyIP2}:${proxyPort}`);
-  return await req.json();
+  // Self-contained TCP health check — no external API (FoolVPN) dependency
+  try {
+    const t0 = Date.now();
+    const socket = connect({ hostname: proxyIP2, port: proxyPort });
+    const ok = await new Promise((resolve) => {
+      socket.writable = true;
+      socket.opened = resolve.bind(null, true);
+      socket.closed = resolve.bind(null, false);
+      socket.error = resolve.bind(null, false);
+      setTimeout(() => {
+        try { socket.close(); } catch (e) {}
+        resolve(false);
+      }, 5000);
+    });
+    const latency = Date.now() - t0;
+    if (!ok) return { statusCode: 0, latency: -1, error: "timeout/unreachable" };
+    try { socket.close(); } catch (e) {}
+    return { statusCode: 200, latency, ok: true };
+  } catch (e) {
+    return { statusCode: 0, latency: -1, error: String(e) };
+  }
 }
 __name(checkProxyHealth, "checkProxyHealth");
 function base64ToArrayBuffer(base64Str) {
