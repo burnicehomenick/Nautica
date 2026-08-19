@@ -1138,9 +1138,11 @@ async function handleSubPage(request, url, env) {
   const pageIndex = parseInt(url.pathname.match(/^\/sub\/(\d+)$/)?.[1] || "0");
   const countrySelect = url.searchParams.get("cc")?.split(",");
   const prxBankUrl = url.searchParams.get("prx-list") || env.PRX_BANK_URL;
-  let prxList = (await getPrxList(prxBankUrl)).filter((prx) =>
+  const allPrx = await getPrxList(prxBankUrl);
+  let prxList = allPrx.filter((prx) =>
     countrySelect ? countrySelect.includes(prx.country) : true
   );
+  const totalGlobal = allPrx.length;
   const pageSize = 24;
   const totalPages = Math.max(1, Math.ceil(prxList.length / pageSize));
   const page = Math.min(pageIndex, totalPages - 1);
@@ -1148,10 +1150,11 @@ async function handleSubPage(request, url, env) {
 
   // == Filter bendera negara (top bar) ==
   const countries = [...new Set(prxList.map((p) => p.country))].sort();
-  let flags = `<a href="/sub" class="flag-chip ${countrySelect ? "" : "active"}" title="Semua negara">🌐</a>`;
+  let flags = `<a href="/sub" class="flag-chip ${countrySelect ? "" : "active"}" title="Semua negara"><span class="flag-emoji">🌐</span><span>Semua</span></a>`;
   for (const c of countries) {
     const act = countrySelect?.includes(c) ? "active" : "";
-    flags += `<a href="/sub?cc=${c}" class="flag-chip ${act}" title="${c}">${getFlagEmoji(c)} <span class="cc">${c}</span></a>`;
+    const count = prxList.filter((p) => p.country === c).length;
+    flags += `<a href="/sub?cc=${c}" class="flag-chip ${act}" title="${c}"><span class="flag-emoji">${getFlagEmoji(c)}</span><span>${c}</span><span class="cc">${count}</span></a>`;
   }
 
   // == Panel wildcard domain (jika env CF API diset) ==
@@ -1230,10 +1233,11 @@ header{display:flex;align-items:center;justify-content:space-between;flex-wrap:w
 .stats{display:flex;gap:16px;font-size:13px;color:#9ca3af}
 .stats b{color:#f59e0b;font-weight:700}
 .flags-bar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:24px}
-.flag-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;background:#17171f;border:1px solid #2a2a35;border-radius:999px;font-size:13px;text-decoration:none;color:#d1d5db;transition:all .15s}
-.flag-chip:hover{border-color:#f59e0b}
+.flag-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#17171f;border:1px solid #2a2a35;border-radius:999px;font-size:13px;text-decoration:none;color:#d1d5db;transition:all .15s;cursor:pointer;user-select:none}
+.flag-chip:hover{border-color:#f59e0b;transform:translateY(-1px)}
 .flag-chip.active{background:#f59e0b;border-color:#f59e0b;color:#09090b;font-weight:700}
-.flag-chip .cc{font-size:10px;opacity:.7}
+.flag-emoji{font-size:16px;line-height:1}
+.flag-chip .cc{font-size:10px;opacity:.7;background:rgba(255,255,255,.12);border-radius:999px;padding:1px 6px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
 .proxy-card{background:#13131b;border:1px solid #23232e;border-radius:14px;padding:16px;transition:all .2s;display:flex;flex-direction:column;gap:12px}
 .proxy-card:hover{border-color:#3a3a4a;transform:translateY(-2px);box-shadow:0 8px 24px rgba(245,158,11,.06)}
@@ -1262,7 +1266,7 @@ footer{margin-top:36px;text-align:center;font-size:11px;color:#4b5563}
 <header>
   <div class="logo">NAUTICA <span>·</span> ${serviceName.toUpperCase()}<small>${APP_DOMAIN}</small></div>
   <div class="stats">
-    <span>Proxy <b>${prxList.length}</b></span>
+    <span>Proxy <b>${totalGlobal}</b></span>
     <span>Page <b>${page + 1}/${totalPages}</b></span>
     <span>Colo <b>SIN</b></span>
   </div>
