@@ -1,4 +1,8 @@
 import { connect } from "cloudflare:sockets";
+
+// esbuild helper (dibutuhkan oleh fungsi bawaan build lama)
+var __defProp = Object.defineProperty;
+var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 var rootDomain = "timeline.eu.org";
 var serviceName = "bakulcilor";
 var apiKey = "";
