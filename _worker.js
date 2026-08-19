@@ -1352,7 +1352,7 @@ var baseHTML = `
         const containerIP = document.getElementById("container-info-ip");
         const containerCountry = document.getElementById("container-info-country");
         const containerISP = document.getElementById("container-info-isp");
-        const res = fetch("https://" + rootDomain + "/api/v1/myip").then(async (res) => {
+        const res = fetch("https://" + APP_DOMAIN + "/api/v1/myip").then(async (res) => {
           if (res.status == 200) {
             const respJson = await res.json();
             containerIP.innerText = "IP: " + respJson.ip;
