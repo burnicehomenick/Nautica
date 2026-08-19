@@ -141,7 +141,7 @@ export default {
       }
 
       if (url.pathname.startsWith("/sub")) {
-        return Response.redirect(SUB_PAGE_URL + `?host=${APP_DOMAIN}`, 301);
+        return await handleSubPage(request, url, env);
       } else if (url.pathname.startsWith("/check")) {
         const target = url.searchParams.get("target").split(":");
         const result = await checkPrxHealth(target[0], target[1] || "443");
@@ -1114,6 +1114,60 @@ function safeCloseWebSocket(socket) {
   } catch (error) {
     console.error("safeCloseWebSocket error", error);
   }
+}
+
+async function handleSubPage(request, url, env) {
+  // Render halaman sub sendiri (gak redirect ke eksternal — anti loop)
+  const pageIndex = parseInt(url.pathname.match(/^\/sub\/(\d+)$/)?.[1] || "0");
+  const countrySelect = url.searchParams.get("cc")?.split(",");
+  const prxBankUrl = url.searchParams.get("prx-list") || env.PRX_BANK_URL;
+  let prxList = (await getPrxList(prxBankUrl)).filter((prx) =>
+    countrySelect ? countrySelect.includes(prx.country) : true
+  );
+  const pageSize = 24;
+  const totalPages = Math.max(1, Math.ceil(prxList.length / pageSize));
+  const page = Math.min(pageIndex, totalPages - 1);
+  const slice = prxList.slice(page * pageSize, page * pageSize + pageSize);
+
+  let rows = "";
+  for (const prx of slice) {
+    const uuid = crypto.randomUUID();
+    const uri = new URL(`${atob(horse)}://${APP_DOMAIN}`);
+    uri.searchParams.set("encryption", "none");
+    uri.searchParams.set("type", "ws");
+    uri.searchParams.set("host", APP_DOMAIN);
+    uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+    uri.searchParams.set("security", "tls");
+    uri.searchParams.set("sni", APP_DOMAIN);
+    uri.username = uuid;
+    uri.port = "443";
+    uri.hash = `${getFlagEmoji(prx.country)} ${prx.org} [${serviceName}]`;
+    rows += `<tr><td>${getFlagEmoji(prx.country)}</td><td>${prx.prxIP}:${prx.prxPort}</td><td>${prx.org}</td><td><code style="font-size:11px">${uri.toString().slice(0, 80)}…</code></td></tr>`;
+  }
+
+  // Pagination
+  let pag = "";
+  for (let i = 0; i < totalPages; i++) {
+    const active = i === page ? 'style="background:#f59e0b;color:#000"' : "";
+    pag += `<a href="/sub/${i}?${url.searchParams.toString()}" ${active} class="px-3 py-1 border rounded">${i + 1}</a> `;
+  }
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${serviceName} — Proxy List</title>
+<script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-neutral-900 text-white p-6">
+<h1 class="text-2xl font-bold mb-2">${serviceName} <span class="text-amber-400">Nautica</span></h1>
+<p class="text-sm mb-1">Total: ${prxList.length} proxy | Page ${page + 1}/${totalPages}</p>
+<p class="text-sm mb-4 text-neutral-400">Endpoint: <code>/api/v1/sub?limit=10&amp;format=raw</code> · Format: raw, v2ray, clash, sfa, bfr</p>
+<table class="w-full text-sm border-collapse">
+<thead><tr class="text-left border-b border-neutral-700"><th class="py-2">Negara</th><th>IP:Port</th><th>Org</th><th>Config</th></tr></thead>
+<tbody>${rows}</tbody></table>
+<div class="mt-4">${pag}</div>
+<p class="mt-6 text-xs text-neutral-500">Powered by Nautica · fork burnicehomenick · ${new Date().toISOString()}</p>
+</body></html>`;
+  return new Response(html, {
+    status: 200,
+    headers: { "Content-Type": "text/html;charset=utf-8", ...CORS_HEADER_OPTIONS },
+  });
 }
 
 async function checkPrxHealth(prxIP, prxPort) {
