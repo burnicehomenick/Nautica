@@ -24,7 +24,6 @@ const RELAY_SERVER_UDP = {
   host: "udp-relay.hobihaus.space", // Kontribusi atau cek relay publik disini: https://hub.docker.com/r/kelvinzer0/udp-relay
   port: 7300,
 };
-const PRX_HEALTH_CHECK_API = "https://id1.foolvpn.web.id/api/v1/check";
 const CONVERTER_URL = "https://api.foolvpn.web.id/convert";
 const WS_READY_STATE_OPEN = 1;
 const WS_READY_STATE_CLOSING = 2;
@@ -1118,8 +1117,25 @@ function safeCloseWebSocket(socket) {
 }
 
 async function checkPrxHealth(prxIP, prxPort) {
-  const req = await fetch(`${PRX_HEALTH_CHECK_API}?ip=${prxIP}:${prxPort}`);
-  return await req.json();
+  // Self-contained health check: TCP connect langsung dari worker.
+  // Gak butuh API eksternal (bebas dari dependency FoolVPN).
+  const timeoutMs = 3000;
+  try {
+    const socket = connect({ hostname: prxIP, port: parseInt(prxPort) || 443 });
+    const result = await Promise.race([
+      new Promise((resolve) => {
+        socket.opened.then(() => resolve({ proxyip: true, delay: 0, method: "tcp" }))
+          .catch(() => resolve({ proxyip: false }));
+      }),
+      new Promise((resolve) => setTimeout(() => {
+        try { socket.close(); } catch (e) {}
+        resolve({ proxyip: false, timeout: true });
+      }, timeoutMs)),
+    ]);
+    return result;
+  } catch (e) {
+    return { proxyip: false, error: String(e) };
+  }
 }
 
 // Helpers
