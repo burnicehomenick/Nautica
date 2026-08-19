@@ -1218,7 +1218,7 @@ async function handleSubPage(request, url, env) {
   const html = `<!DOCTYPE html><html lang="id"><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>${serviceName} · ${rootDomain}</title>
+<title>${serviceName} · ${APP_DOMAIN}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0a0a0f;color:#e5e7eb;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;min-height:100vh}
@@ -1260,7 +1260,7 @@ footer{margin-top:36px;text-align:center;font-size:11px;color:#4b5563}
 <body>
 <div class="wrap">
 <header>
-  <div class="logo">NAUTICA <span>·</span> ${serviceName.toUpperCase()}<small>${rootDomain}</small></div>
+  <div class="logo">NAUTICA <span>·</span> ${serviceName.toUpperCase()}<small>${APP_DOMAIN}</small></div>
   <div class="stats">
     <span>Proxy <b>${prxList.length}</b></span>
     <span>Page <b>${page + 1}/${totalPages}</b></span>
