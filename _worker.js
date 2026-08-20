@@ -272,32 +272,25 @@ var worker_default = {
               finalResult = btoa(result.join("\n"));
               break;
             case "clash":
-            case "sfa":
-            case "bfr":
-              const res = await fetch(CONVERTER_URL, {
-                method: "POST",
-                body: JSON.stringify({
-                  url: result.join(","),
-                  format: filterFormat,
-                  template: "cf"
-                })
-              });
-              if (res.status == 200) {
-                finalResult = await res.text();
-              } else {
-                return new Response(res.statusText, {
-                  status: res.status,
-                  headers: {
-                    ...CORS_HEADER_OPTIONS
-                  }
-                });
-              }
-              break;
+                        case "sfa":
+                        case "bfr":
+                          finalResult = convertConfigs(result.join("\n"), filterFormat);
+                          break;
           }
           return new Response(finalResult, {
             status: 200,
             headers: {
               ...CORS_HEADER_OPTIONS
+            }
+          });
+        } else if (apiPath.startsWith("/convert")) {
+          const body2 = await request.json();
+          const converted = convertConfigs(body2?.url || "", body2?.format || "raw");
+          return new Response(converted, {
+            status: 200,
+            headers: {
+              ...CORS_HEADER_OPTIONS,
+              "Content-Type": body2?.format === "clash" ? "text/yaml" : "application/json"
             }
           });
         } else if (apiPath.startsWith("/myip")) {
@@ -831,6 +824,109 @@ function getFlagEmoji(isoCode) {
   return String.fromCodePoint(...codePoints);
 }
 __name(getFlagEmoji, "getFlagEmoji");
+
+// === Converter mandiri (pengganti api.foolvpn.me yang mati) ===
+function parseConfig(raw) {
+  const u = new URL(raw);
+  const scheme = u.protocol.replace(":", "");
+  const params = u.searchParams;
+  const obj = {
+    scheme,
+    name: decodeURIComponent(u.hash.replace("#", "")) || u.hostname,
+    host: u.hostname,
+    port: parseInt(u.port || "443", 10),
+    network: params.get("type") || "tcp",
+    tls: params.get("security") === "tls",
+    sni: params.get("sni") || u.hostname,
+    path: params.get("path") || "/",
+    hostHeader: params.get("host") || u.hostname
+  };
+  if (scheme === "trojan") {
+    obj.type = "trojan";
+    obj.password = u.username;
+  } else if (scheme === "vless") {
+    obj.type = "vless";
+    obj.uuid = u.username;
+    obj.flow = params.get("flow") || "";
+  } else if (scheme === "ss") {
+    obj.type = "ss";
+    try {
+      const dec = atob(u.username);
+      const idx = dec.indexOf(":");
+      obj.method = dec.slice(0, idx);
+      obj.password = dec.slice(idx + 1);
+    } catch (e) {
+      obj.method = "none";
+      obj.password = u.username;
+    }
+    const plugin = params.get("plugin") || "";
+    if (plugin.includes("v2ray-plugin")) {
+      obj.plugin = "v2ray-plugin";
+      obj.network = plugin.includes("mode=websocket") ? "ws" : "tcp";
+      obj.pluginTls = plugin.includes(";tls");
+      const pm = plugin.match(/path=([^;]+)/);
+      if (pm) obj.path = pm[1];
+      const hm = plugin.match(/host=([^;]+)/);
+      if (hm) obj.hostHeader = hm[1];
+    }
+  }
+  return obj;
+}
+__name(parseConfig, "parseConfig");
+
+function toClashYaml(parsed) {
+  let out = "proxies:\n";
+  for (const p of parsed) {
+    const wsOpts = p.network === "ws" || p.plugin === "v2ray-plugin"
+      ? `    ws-opts:\n      path: ${p.path}\n      headers:\n        Host: ${p.hostHeader}\n` : "";
+    if (p.type === "trojan") {
+      out += `  - name: "${p.name}"\n    type: trojan\n    server: ${p.host}\n    port: ${p.port}\n    password: "${p.password}"\n    udp: true\n    sni: ${p.sni}\n    skip-cert-verify: false\n    network: ws\n${wsOpts}`;
+    } else if (p.type === "vless") {
+      out += `  - name: "${p.name}"\n    type: vless\n    server: ${p.host}\n    port: ${p.port}\n    uuid: ${p.uuid}\n    udp: true\n    tls: ${p.tls}\n    servername: ${p.sni}\n    network: ws\n${wsOpts}`;
+    } else if (p.type === "ss") {
+      out += `  - name: "${p.name}"\n    type: ss\n    server: ${p.host}\n    port: ${p.port}\n    cipher: ${p.method}\n    password: "${p.password}"\n    udp: true\n`;
+      if (p.plugin === "v2ray-plugin") {
+        out += `    plugin: v2ray-plugin\n    plugin-opts:\n      mode: websocket\n      tls: ${p.pluginTls}\n      path: ${p.path}\n      host: ${p.hostHeader}\n`;
+      }
+    }
+  }
+  return out;
+}
+__name(toClashYaml, "toClashYaml");
+
+function toSingboxJson(parsed) {
+  const outbounds = [];
+  for (const p of parsed) {
+    const ob = { type: p.type, tag: p.name, server: p.host, server_port: p.port };
+    if (p.type === "trojan") ob.password = p.password;
+    if (p.type === "vless") {
+      ob.uuid = p.uuid;
+      if (p.flow) ob.flow = p.flow;
+    }
+    if (p.type === "ss") {
+      ob.method = p.method;
+      ob.password = p.password;
+      if (p.plugin === "v2ray-plugin") ob.plugin = "v2ray-plugin";
+    }
+    ob.tls = { enabled: p.tls, server_name: p.sni, insecure: false };
+    if (p.network === "ws" || p.plugin === "v2ray-plugin") {
+      ob.transport = { type: "ws", path: p.path, headers: { Host: p.hostHeader } };
+    }
+    outbounds.push(ob);
+  }
+  return JSON.stringify({ outbounds }, null, 2);
+}
+__name(toSingboxJson, "toSingboxJson");
+
+function convertConfigs(rawText, format) {
+  const urls = rawText.split(/[\n,]/).map((s) => s.trim()).filter((s) => s.startsWith("trojan://") || s.startsWith("vless://") || s.startsWith("ss://"));
+  const parsed = urls.map(parseConfig);
+  if (format === "clash") return toClashYaml(parsed);
+  if (format === "sfa" || format === "bfr") return toSingboxJson(parsed);
+  if (format === "v2ray") return btoa(urls.join("\n"));
+  return urls.join("\n");
+}
+__name(convertConfigs, "convertConfigs");
 var CloudflareApi = class {
   static {
     __name(this, "CloudflareApi");
@@ -1221,29 +1317,29 @@ var baseHTML = `
       }
 
       async function copyToClipboardAsTarget(target) {
-        windowInfoContainer.innerText = "Generating config...";
-        const url = "${CONVERTER_URL}";
-        const res = await fetch(url, {
-          method: "POST",
-          body: JSON.stringify({
-            url: rawConfig,
-            format: target,
-            template: "cf",
-          }),
-        });
+              windowInfoContainer.innerText = "Generating config...";
+              // converter mandiri — jalankan di worker via endpoint /api/v1/convert
+              const url = "https://" + rootDomain + "/api/v1/convert";
+              const res = await fetch(url, {
+                method: "POST",
+                body: JSON.stringify({
+                  url: rawConfig,
+                  format: target,
+                }),
+              });
 
-        if (res.status == 200) {
-          windowInfoContainer.innerText = "Done!";
-          navigator.clipboard.writeText(await res.text());
+              if (res.status == 200) {
+                windowInfoContainer.innerText = "Done!";
+                navigator.clipboard.writeText(await res.text());
 
-          notification.classList.remove("opacity-0");
-          setTimeout(() => {
-            notification.classList.add("opacity-0");
-          }, 2000);
-        } else {
-          windowInfoContainer.innerText = "Error " + res.statusText;
-        }
-      }
+                notification.classList.remove("opacity-0");
+                setTimeout(() => {
+                  notification.classList.add("opacity-0");
+                }, 2000);
+              } else {
+                windowInfoContainer.innerText = "Error " + res.statusText;
+              }
+            }
 
       function navigateTo(link) {
         window.location.href = link + window.location.search;
