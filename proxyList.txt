@@ -479,11 +479,5 @@
 45.151.132.228,19034,US,Spartan Host Ltd
 47.251.95.178,443,US,Alibaba Cloud - US
 72.13.122.137,443,US,Total Uptime Technologies LLC
-103.6.207.108,8080,ID,PT Pusat Media Indonesia
 172.232.239.151,587,ID,Akamai Connected Cloud
-182.253.40.149,3389,ID,PT Telkom Indonesia 2
-203.194.112.119,2053,ID,First Cagayan Converge Data Center Inc.
-203.194.112.119,8443,ID,First Cagayan Converge Data Center Inc.
-35.219.50.99,443,ID,Google Cloud
-43.218.77.16,1443,ID,Amazon.com
-43.218.77.16,443,ID,Amazon.com, Inc.
+203.194.112.119,443,ID,CV. Rumahweb Indonesia
